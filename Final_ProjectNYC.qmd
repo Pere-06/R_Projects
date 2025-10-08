@@ -1,0 +1,307 @@
+---
+title: "Final Projet NYC"
+format: html
+author: Pere Caparrós, Hugo Villalabeitia
+html:
+    self-contained: true
+    toc: true
+    code-fold: true        
+output-file: index.html
+---
+
+# Emergencies registered in New York City
+
+## Introduction
+
+In this project we will explore the amount of incidents that concerns to OEM (Office of Emergency Managment) registered since August 2016. We will try to see where OEM can act faster to solve citizen problems.
+
+First of all, we need to open some libraries to manipulate and visualize the data.
+
+#### Loading necessary libraries
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(stringr)
+library(lubridate)
+library(forcats)
+```
+
+#### Loading the dataset
+
+We introduce the data from **NYC Open Data** *(https://data.cityofnewyork.us/Public-Safety/Emergency-Response-Incidents/pasr-j7fb/about_data)*
+
+```{r}
+emergencies = read.csv('https://data.cityofnewyork.us/resource/pasr-j7fb.csv?$limit=50000')
+```
+
+## Cleaning Data
+
+Next step will be focused on cleaning the data we have taken from NYC open Data. We first use an *str_trim()* to modify the 'incident_type' values to clean and organised values, so we can reorder them in next steps.
+
+```{r}
+emergencies %>%
+  mutate(incident_type = str_trim(incident_type)) %>%
+  head(10)
+```
+
+Below we can see how we change the column 'creation_date' to two columns called 'date' and 'time.' In the 'date' one, we have the year-month-day. In the 'time' column, we have the time in hours:minutes. We did this in order to have a more clear structure for the date and the exact minute each event happened.
+
+```{r}
+emergencies = emergencies %>%
+  rename('creat_date' = 'creation_date',
+         'close_date' = 'closed_date') %>%
+  mutate(
+    creat_date = ymd_hms(creat_date),
+    creat_date = floor_date(creat_date, unit = 'minute'),
+    creation_date = as.Date(creat_date),
+    creation_time = format(creat_date, format = '%H:%M'),
+    close_date = ydm_hms(close_date),
+    close_date = floor_date(close_date, unit = 'minute'),
+    closed_date = as.Date(close_date),
+    closed_time = format(close_date, format = '%H:%M')
+  ) 
+head(emergencies, 10) 
+```
+
+After analyzing which variables we will need, we decide to eliminate some columns such as 'creation_date' and 'closed_date'.
+
+```{r}
+emergencies_small = emergencies %>%
+  select(-creat_date, -close_date)
+
+head(emergencies_small)
+```
+
+## How are the incidences distributed by New York City boroughs?
+
+We will answer this question with the aid of the code written below.
+
+```{r}
+emergency_by_borough = emergencies_small %>%
+  group_by(borough) %>%
+  summarise(
+    Number_of_incidents = n()
+  )
+
+head(emergency_by_borough)
+```
+
+We can observe that there is a problem with 'Staten Island'. There is a grammar mistake that causes a wrong number on 'Staten Island' which has 25 incidents and should have 26 due to the column named as 'Staten ISland'. We can also see similar cases with Queens (queens), Brooklyn(brooklyn) or Bronx (bronx). We will rename them all bellow and fix this problem.
+
+```{r}
+emergencies_small = emergencies_small %>%
+  mutate(borough = case_when(
+    str_detect(str_to_lower(borough), "brooklyn") ~ "Brooklyn",
+    str_detect(str_to_lower(borough), "manhattan") ~ "Manhattan",
+    str_detect(str_to_lower(borough), "queens") ~ "Queens",
+    str_detect(str_to_lower(borough), "bronx") ~ "Bronx",
+    str_detect(str_to_lower(borough), "staten") ~ "Staten Island",
+    TRUE ~ NA_character_ 
+  ))
+
+
+```
+
+After these few lines of code, we have cleaned the data and inserted correctly into the 5 boroughs. However, we have some NA values that we have not been able to insert them into any borough.
+
+```{r}
+emergency_by_borough = emergencies_small %>%
+  group_by(borough) %>%
+  summarise(
+    Number_of_incidents = n()
+  )
+emergencies_clean = emergency_by_borough[complete.cases(emergency_by_borough),]
+head(emergencies_clean)
+```
+
+Finally, we have this table showing the number of incidences in each New York City borough.
+
+#### Plot 1: How many incidents have occurred in each borough of New York City?
+
+```{r}
+library(ggthemes)
+
+
+ggplot(emergencies_clean, aes(x = reorder(borough, Number_of_incidents), y = Number_of_incidents, alpha = Number_of_incidents)) +
+  geom_col(fill = 'darkgreen') +
+  coord_flip() +
+  theme_economist() +
+  labs(x = 'Borough', y = 'Number of incidents', title = 'Number of incidents per borough in New York city', caption = 'Final Project LaSalle - Pace University')
+```
+
+We can see that the districts of Manhattan and Brooklyn are the ones with the highest number of incidences recorded since August 2016. For this reason, we decide to do a deeper research in these two boroughs; searching which is the main incidence type and the most frequent hours and months where occurs.
+
+## Investigation of the main causes of incidences in Manhattan and Brooklyn
+
+#### Manhattan
+
+```{r}
+emergencies_manhattan = emergencies_small %>%
+  filter(
+    borough == 'Manhattan'
+  ) 
+
+emergency_type = emergencies_manhattan %>%
+   mutate(
+    incident_type = ifelse(incident_type == 'LawEnforcement-Suspicious Package', 'Law Enforcement-Suspicious Package', incident_type)
+  ) %>%
+  group_by(incident_type) %>%
+  summarise(
+    Number_of_incidents = n()
+  ) %>%
+   mutate(
+    Rank = rank(-Number_of_incidents)  # or: rank(desc(Number_of_incidents))
+  ) %>%
+  arrange(Rank) %>%
+  filter(
+    Rank <= 10
+  )
+
+
+ggplot(emergency_type, aes(x = reorder(incident_type, Number_of_incidents), y = Number_of_incidents)) +
+  geom_col(fill = 'chocolate3') +
+  coord_flip() +
+  labs() +
+  labs(x = 'Number of incidents', y = 'Incident type', title = 'Top 10 incidents in Manhattan', caption = 'Final Project LaSalle - Pace University') +
+  theme_economist()
+
+```
+
+In this barchart is shown an elevated number of water main issues.
+
+#### Brooklyn
+
+```{r}
+emergencies_brooklyn = emergencies_small %>%
+  filter(
+    borough == 'Brooklyn'
+  )
+
+emergency_type_2 = emergencies_brooklyn %>%
+  group_by(incident_type) %>%
+  summarise(
+    Number_of_incidents = n()
+  ) %>%
+   mutate(
+    Rank = rank(-Number_of_incidents)  # or: rank(desc(Number_of_incidents))
+  ) %>%
+  arrange(Rank) %>%
+  filter(
+    Rank <= 10
+  )
+
+
+head(emergency_type_2)
+
+ggplot(emergency_type_2, aes(x = reorder(incident_type, Number_of_incidents), y = Number_of_incidents)) +
+  geom_col(fill = 'chocolate3') +
+  coord_flip() +
+  labs() +
+  labs(x = 'Number of incidents', y = 'Incident type', title = 'Top 10 incidents in Brooklyn', caption = 'Final Project LaSalle - Pace University') +
+  theme_economist()
+
+```
+
+Fire alarms are, by far, the type of incidents that have been more common in the Brooklyn district since August 2016.
+
+## Which are the hours with most number of incidences in Manhattan and Brooklyn?
+
+#### Manhattan
+
+```{r}
+
+incidents_per_hour_manhattan = emergencies_manhattan %>%
+  mutate(
+    hour = hour(hm(creation_time))
+    )
+
+
+incidents_per_hour_count_manhattan = incidents_per_hour_manhattan %>%
+  group_by(hour) %>%
+  summarise(
+    Number_of_incidents = n()
+  )
+
+ggplot(incidents_per_hour_count_manhattan, aes(x = hour, Number_of_incidents)) +
+  geom_smooth(color = 'darkgreen', se = F) +
+  geom_col(fill = 'darkgoldenrod4', alpha = 0.7) +
+  theme_economist() +
+  labs(x = 'Hour of the day', y = 'Number of incidents', title = 'Incidents per hour in Manhattan since August 2016', caption = 'Final Project LaSalle - Pace University')
+  
+```
+
+We can observe that the hours with most incidence in Manhattan are between 9 am and 5 pm.
+
+#### Brooklyn
+
+```{r}
+incidents_per_hour_brooklyn = emergencies_brooklyn %>%
+  mutate(
+    hour = hour(hm(creation_time))
+    )
+
+
+incidents_per_hour_count_brooklyn = incidents_per_hour_brooklyn %>%
+  group_by(hour) %>%
+  summarise(
+    Number_of_incidents = n()
+  )
+
+ggplot(incidents_per_hour_count_brooklyn, aes(x = hour, Number_of_incidents)) +
+  geom_smooth(color = 'darkgreen', se = F) +
+  geom_col(fill = 'darkgoldenrod4', alpha = 0.7) +
+  theme_economist() +
+  labs(x = 'Hour of the day', y = 'Number of incidents', title = 'Incidents per hour in Brooklyn since August 2016', caption = 'Final Project LaSalle - Pace University')
+```
+
+The Brooklyn district has a more even distribution of incidents throughout the day, compared to Manhattan, being the interval from 7 am to 3 pm.
+
+## Which are the months in the day that have the most number of incidents in Manhattan and Brooklyn?
+
+#### Manhattan
+
+```{r}
+Incidences_per_month_manhattan = emergencies_manhattan %>% 
+  mutate(
+    month = month(creation_date, label = T)
+  ) %>%
+  group_by(month) %>%
+  summarise(
+    Number_of_incidents = n()
+  ) 
+
+ggplot(Incidences_per_month_manhattan, aes(x = reorder(month, Number_of_incidents), y = Number_of_incidents, alpha = Number_of_incidents)) +
+  geom_col(fill = 'blue') +
+  labs(x = 'Month', y = 'Number of incidences', title = 'Manhattan incidences of each month since August 2016', caption = 'Final Project LaSalle - Pace University') +
+  theme_economist()
+
+
+```
+
+In Manhattan the most incident month is July. We would need to do a deep research to know exactly the reasons why July has the highest number of incidences but could be caused by the high volume of tourism in months of December and July.
+
+#### Brooklyn
+
+```{r}
+Incidences_per_month_brooklyn = emergencies_brooklyn %>% 
+  mutate(
+    month = month(creation_date, label = T)
+  ) %>%
+  group_by(month) %>%
+  summarise(
+    Number_of_incidents = n()
+  ) 
+
+ggplot(Incidences_per_month_brooklyn, aes(x = reorder(month, Number_of_incidents), y = Number_of_incidents, alpha = Number_of_incidents)) +
+  geom_col(fill = 'blue') +
+  labs(x = 'Month', y = 'Number of incidences', title = 'Brooklyn incidences of each month since August 2016', caption = 'Final Project LaSalle - Pace University') +
+  theme_economist()
+```
+
+Talking about Brooklyn, we see that in March and April the incidences increase. However, the month with less incidences is October. Could be caused by the increasing temperature or by the increasing tourism in that part of the city. However, we would need to research more in deep to find the correct causes of this increase.
+
+## Conclusions & final insights
+
+With our analysis of the NYC incidents, we could determine that the districts with the highest number of incidents were Manhattan and Brooklyn, in the interval of 7 Am to 7 PM in the case of Manhattan, which could lead us to concluding the higher the activity of the district the higher the number of incidences (from 7 AM until around 7 PM school and working hours make the city increase its activity), and with a similar interval for Brooklyn (7 AM to 5 PM), but this district being a bit more evenly distributed for all the hours of the day. For the type of incidents recorded, the Manhattan borough showed a worrying high number of water incidents, followed by fire alarms triggered as a cause of several incidents. Here we can say that the problem to address is the water main issue, and to have NYFD firefighters available to respond to fire alarms, specially between 7 AM and 7 PM, since the night hours show a relatively low number of incidents for this district. For the borough of Brooklyn, the clean data showed a high number of fire alarms as the main type of incidents. Combined with the even distribution of incidents throughout the whole day, we think that this district needs firefighter available to respond to these situations quickly 24/7, since at any given time something could happen in this district, but also emphasizing the interval of the higher activity for the district (7 AM to 5 PM).
